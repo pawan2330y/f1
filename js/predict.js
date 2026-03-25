@@ -82,6 +82,70 @@ RULES:
 - Return ONLY valid JSON, no markdown fences, no explanation text`;
   },
 
+  // ── SHARED FETCH HELPER ───────────────────
+
+  async callQwen(messages, maxTokens = 1200, temperature = 0.4, model = null) {
+    const tryModel = async (modelId) => {
+      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${CONFIG.OPENROUTER_API_KEY}`,
+          "HTTP-Referer": window.location.href,
+          // ASCII only - em-dash and other non-ISO-8859-1 chars crash the fetch
+          "X-Title": "F1 Predictor 2026 College Edition",
+        },
+        body: JSON.stringify({
+          model: modelId,
+          messages,
+          temperature,
+          max_tokens: maxTokens,
+        }),
+      });
+
+      // Read body as text first - .json() on a 401/429/503 throws "unexpected end"
+      const text = await res.text();
+
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try { msg = JSON.parse(text)?.error?.message || msg; } catch {}
+        const err = new Error(msg);
+        err.status = res.status;
+        throw err;
+      }
+
+      let content = "";
+      try {
+        content = JSON.parse(text)?.choices?.[0]?.message?.content || "";
+      } catch {
+        throw new Error("Invalid JSON response from OpenRouter");
+      }
+
+      // Strip markdown fences Qwen sometimes wraps around JSON output
+      content = content
+        .replace(/^```json\s*/i, "")
+        .replace(/^```\s*/i, "")
+        .replace(/\s*```$/i, "")
+        .trim();
+
+      return content;
+    };
+
+    const primary  = model || CONFIG.QWEN_MODEL;
+    const fallback = CONFIG.QWEN_MODEL_FALLBACK;
+
+    try {
+      return await tryModel(primary);
+    } catch (e) {
+      // On rate-limit or unavailable, retry with smaller fallback model
+      if (e.status === 429 || e.status === 503 || e.status === 502) {
+        console.warn(`Primary model failed (${e.status}), retrying with fallback model`);
+        return await tryModel(fallback);
+      }
+      throw e;
+    }
+  },
+
   // ── CALL QWEN VIA OPENROUTER ──────────────
 
   async getPrediction(race, weather, drivers, teams, recentResults) {
@@ -94,39 +158,15 @@ RULES:
     try {
       UI.showPredictionLoading(true);
 
-      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${CONFIG.OPENROUTER_API_KEY}`,
-          "HTTP-Referer": window.location.href,
-          "X-Title": "F1 Predictor 2026 — College Edition",
-        },
-        body: JSON.stringify({
-          model: CONFIG.QWEN_MODEL,
-          messages: [{ role: "user", content: prompt }],
-          temperature: 0.4,
-          max_tokens: 1200,
-        }),
-      });
+      const content = await this.callQwen(
+        [{ role: "user", content: prompt }],
+        1200, 0.4
+      );
 
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error?.message || `HTTP ${res.status}`);
-      }
-
-      const data = await res.json();
-      let content = data.choices?.[0]?.message?.content || "";
-
-      // Strip any accidental markdown fences
-      content = content.replace(/```json|```/g, "").trim();
-
-      // Parse JSON
       const prediction = JSON.parse(content);
       prediction._generatedAt = new Date().toISOString();
       prediction._model = CONFIG.QWEN_MODEL;
 
-      // Cache for 6 hours
       CACHE.set(cacheKey, prediction);
       return prediction;
 
@@ -148,10 +188,10 @@ RULES:
     const prompt = `You are an F1 statistics and championship probability analyst.
 
 ## CURRENT DRIVER STANDINGS
-${drivers.slice(0,8).map(d => `${d.pos}. ${d.name} (${d.team}) — ${d.pts} pts`).join("\n")}
+${drivers.slice(0,8).map(d => `${d.pos}. ${d.name} (${d.team}) - ${d.pts} pts`).join("\n")}
 
 ## CURRENT CONSTRUCTOR STANDINGS
-${teams.slice(0,5).map(t => `${t.pos}. ${t.name} — ${t.pts} pts`).join("\n")}
+${teams.slice(0,5).map(t => `${t.pos}. ${t.name} - ${t.pts} pts`).join("\n")}
 
 ## SEASON CONTEXT
 Races completed: ${FALLBACK_DATA.results.length} of 22
@@ -162,55 +202,41 @@ Max points remaining (inc. fastest lap): ${remainingRaces * 26}
 ## TEAM PERFORMANCE
 ${teams.slice(0,5).map(t => `${t.name}: Pace ${t.pace}/10 | Reliability ${t.reliability}/10`).join("\n")}
 
-Generate championship forecasts in this EXACT JSON (no extra text):
+Generate championship forecasts in this EXACT JSON (no extra text, no markdown fences):
 
 {
   "wdc": {
     "favourite": "Driver Full Name",
     "favouriteTeam": "Team",
-    "probability": 0.00,
+    "probability": 0.72,
     "contenders": [
-      { "driver": "Name", "team": "Team", "probability": 0.00, "gap": 0 },
-      { "driver": "Name", "team": "Team", "probability": 0.00, "gap": 0 },
-      { "driver": "Name", "team": "Team", "probability": 0.00, "gap": 0 }
+      { "driver": "Name", "team": "Team", "probability": 0.18, "gap": 4 },
+      { "driver": "Name", "team": "Team", "probability": 0.07, "gap": 17 },
+      { "driver": "Name", "team": "Team", "probability": 0.03, "gap": 18 }
     ],
     "analysis": "3-4 sentence narrative on WDC picture",
     "keyRisks": ["risk 1", "risk 2", "risk 3"]
   },
   "wcc": {
     "favourite": "Constructor Name",
-    "probability": 0.00,
+    "probability": 0.81,
     "contenders": [
-      { "team": "Name", "probability": 0.00, "gap": 0 },
-      { "team": "Name", "probability": 0.00, "gap": 0 }
+      { "team": "Name", "probability": 0.14, "gap": 31 },
+      { "team": "Name", "probability": 0.05, "gap": 80 }
     ],
     "analysis": "3-4 sentence narrative on WCC picture",
     "keyRisks": ["risk 1", "risk 2"]
   }
 }
 
-Probabilities must be realistic (0.01–0.99) and sum to ≤ 1.0 within each category. Return ONLY valid JSON.`;
+Probabilities must be realistic (0.01-0.99) and sum to 1.0 within each category. Return ONLY valid JSON, no extra text.`;
 
     try {
-      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${CONFIG.OPENROUTER_API_KEY}`,
-          "HTTP-Referer": window.location.href,
-          "X-Title": "F1 Predictor 2026",
-        },
-        body: JSON.stringify({
-          model: CONFIG.QWEN_MODEL,
-          messages: [{ role: "user", content: prompt }],
-          temperature: 0.3,
-          max_tokens: 900,
-        }),
-      });
+      const content = await this.callQwen(
+        [{ role: "user", content: prompt }],
+        900, 0.3
+      );
 
-      const data = await res.json();
-      let content = data.choices?.[0]?.message?.content || "";
-      content = content.replace(/```json|```/g, "").trim();
       const forecast = JSON.parse(content);
       CACHE.set(cacheKey, forecast);
       return forecast;

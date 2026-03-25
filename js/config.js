@@ -7,8 +7,9 @@ const CONFIG = {
   // Get your free key at https://openrouter.ai/keys
   OPENROUTER_API_KEY: "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",
 
-  // Free Qwen model via OpenRouter
+  // Free Qwen models via OpenRouter (first is tried, second is fallback)
   QWEN_MODEL: "qwen/qwen3-235b-a22b:free",
+  QWEN_MODEL_FALLBACK: "qwen/qwen3-8b:free",
 
   // API base URLs (all free, no key needed except OpenRouter)
   OPENF1_BASE: "https://api.openf1.org/v1",
