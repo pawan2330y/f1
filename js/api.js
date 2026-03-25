@@ -1,28 +1,45 @@
 // ─────────────────────────────────────────────
 //  F1 PREDICTOR 2026  ·  api.js
 //  All live data from OpenF1 + Open-Meteo
-//  No hardcoded race results or standings
 // ─────────────────────────────────────────────
 
 const API = {
 
   BASE: "https://api.openf1.org/v1",
 
-  // ── GENERIC FETCH WITH ERROR HANDLING ────
+  // ── GENERIC FETCH WITH RETRY & BACKOFF ───
+  // FIX: retries on 429 with exponential backoff
+  // instead of failing immediately
 
-  async get(path) {
-    try {
-      const res = await fetch(`${API.BASE}${path}`);
-      if (!res.ok) throw new Error(`OpenF1 ${res.status}: ${path}`);
-      return await res.json();
-    } catch (e) {
-      console.warn("OpenF1 fetch failed:", path, e.message);
-      return null;
+  async get(path, retries = 2, backoff = 1000) {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const res = await fetch(`${API.BASE}${path}`);
+
+        if (res.status === 429) {
+          if (attempt < retries) {
+            console.warn(`OpenF1 rate limited on ${path}, retrying in ${backoff}ms…`);
+            await new Promise(r => setTimeout(r, backoff));
+            backoff *= 2; // 1s → 2s → 4s
+            continue;
+          }
+          throw new Error(`OpenF1 429: ${path}`);
+        }
+
+        if (!res.ok) throw new Error(`OpenF1 ${res.status}: ${path}`);
+        return await res.json();
+
+      } catch (e) {
+        if (attempt === retries) {
+          console.warn("OpenF1 fetch failed:", path, e.message);
+          return null;
+        }
+      }
     }
+    return null;
   },
 
   // ── MEETINGS (race calendar) ──────────────
-  // Returns all race weekends for a given year
 
   async getMeetings(year = CONFIG.SEASON) {
     const data = await this.get(`/meetings?year=${year}`);
@@ -30,13 +47,12 @@ const API = {
     return data.sort((a, b) => new Date(a.date_start) - new Date(b.date_start));
   },
 
-  // ── SESSIONS for a meeting ────────────────
+  // ── SESSIONS ─────────────────────────────
 
   async getSessions(meetingKey) {
     return await this.get(`/sessions?meeting_key=${meetingKey}`);
   },
 
-  // Get all race sessions for a year
   async getRaceSessions(year = CONFIG.SEASON) {
     const data = await this.get(`/sessions?year=${year}&session_type=Race`);
     if (!data || !data.length) return null;
@@ -44,7 +60,6 @@ const API = {
   },
 
   // ── RACE RESULT for a session ─────────────
-  // /session_result gives final classified positions
 
   async getSessionResult(sessionKey) {
     const data = await this.get(`/session_result?session_key=${sessionKey}`);
@@ -57,15 +72,12 @@ const API = {
   async getDrivers(sessionKey) {
     const data = await this.get(`/drivers?session_key=${sessionKey}`);
     if (!data || !data.length) return null;
-    // Key by driver_number for easy lookup
     const map = {};
     data.forEach(d => { map[d.driver_number] = d; });
     return map;
   },
 
   // ── CHAMPIONSHIP STANDINGS ────────────────
-  // /championship_drivers returns points_current & position_current
-  // Use the latest available race session_key for current standings
 
   async getDriverChampionship(sessionKey) {
     const data = await this.get(`/championship_drivers?session_key=${sessionKey}`);
@@ -79,14 +91,13 @@ const API = {
     return data.sort((a, b) => (a.position_current || 99) - (b.position_current || 99));
   },
 
-  // ── STINTS (tyre data) ────────────────────
+  // ── STINTS ────────────────────────────────
 
   async getStints(sessionKey) {
     return await this.get(`/stints?session_key=${sessionKey}`);
   },
 
   // ── WEATHER at a circuit ──────────────────
-  // Open-Meteo — free, no key needed
 
   async getWeather(raceName, raceDate) {
     const circuit = CONFIG.CIRCUITS[raceName];
@@ -104,11 +115,11 @@ const API = {
       const rainMm   = data.daily?.precipitation_sum?.[0] ?? 0;
       const rainProb = data.daily?.precipitation_probability_max?.[0] ?? 10;
       return {
-        tempMax:   data.daily?.temperature_2m_max?.[0]  ?? 22,
-        tempMin:   data.daily?.temperature_2m_min?.[0]  ?? 15,
+        tempMax:   data.daily?.temperature_2m_max?.[0] ?? 22,
+        tempMin:   data.daily?.temperature_2m_min?.[0] ?? 15,
         rainMm,
         rainProb,
-        windMax:   data.daily?.windspeed_10m_max?.[0]   ?? 15,
+        windMax:   data.daily?.windspeed_10m_max?.[0]  ?? 15,
         condition: rainMm > 2 ? "Wet" : rainProb > 50 ? "Damp risk" : rainProb > 25 ? "Possible rain" : "Dry",
       };
     } catch (e) {
@@ -117,7 +128,7 @@ const API = {
     }
   },
 
-  // ── FASTEST LAP in a session ──────────────
+  // ── FASTEST LAP ───────────────────────────
 
   async getFastestLap(sessionKey) {
     const data = await this.get(`/laps?session_key=${sessionKey}&is_pit_out_lap=false`);
@@ -131,54 +142,44 @@ const API = {
 
 // ─────────────────────────────────────────────
 //  DATA LOADER
-//  Orchestrates all API calls and builds the
-//  complete app state from live data
 // ─────────────────────────────────────────────
 
 const LOADER = {
 
-  // Master load — called once on boot
   async loadAll() {
     console.log("Loading live F1 data...");
 
-    // 1. Get full calendar
     const meetings = await API.getMeetings(CONFIG.SEASON);
     if (!meetings) {
       console.warn("Meetings unavailable, using static calendar");
       return this.buildFromStatic();
     }
 
-    // 2. Get all completed race sessions
-    const raceSessions = await API.getRaceSessions(CONFIG.SEASON);
-    const completedSessions = (raceSessions || []).filter(s =>
+    const raceSessions       = await API.getRaceSessions(CONFIG.SEASON);
+    const completedSessions  = (raceSessions || []).filter(s =>
       s.date_end && new Date(s.date_end) < new Date()
     );
-
     const lastSession = completedSessions[completedSessions.length - 1];
 
-    // 3. Fetch championship standings from last completed session
     let driverStandings = null;
     let teamStandings   = null;
     let driverMap       = {};
 
     if (lastSession) {
-      // FIX: sequential with delay to avoid 429 rate limiting
-      await this.delay(300);
+      // FIX: 800ms delays between each championship call to avoid 429
+      await this.delay(800);
       const champDrivers = await API.getDriverChampionship(lastSession.session_key);
-      await this.delay(300);
-      const champTeams = await API.getConstructorChampionship(lastSession.session_key);
-      await this.delay(300);
-      const drivers = await API.getDrivers(lastSession.session_key);
+      await this.delay(800);
+      const champTeams   = await API.getConstructorChampionship(lastSession.session_key);
+      await this.delay(800);
+      const drivers      = await API.getDrivers(lastSession.session_key);
 
-      if (drivers)      driverMap      = drivers;
+      if (drivers)      driverMap       = drivers;
       if (champDrivers) driverStandings = this.parseDriverStandings(champDrivers, driverMap);
       if (champTeams)   teamStandings   = this.parseTeamStandings(champTeams);
     }
 
-    // 4. Build race results for completed rounds
-    const results = await this.loadResults(completedSessions, meetings);
-
-    // 5. Build calendar (merge meetings with session status)
+    const results  = await this.loadResults(completedSessions, meetings);
     const calendar = this.buildCalendar(meetings, raceSessions || []);
 
     return {
@@ -190,7 +191,7 @@ const LOADER = {
     };
   },
 
-  // FIX: sequential loop with delay instead of Promise.all to avoid 429s
+  // FIX: sequential loop with 800ms gap between sessions
   async loadResults(completedSessions, meetings) {
     const results = [];
     const toLoad  = completedSessions.slice(-5);
@@ -199,8 +200,7 @@ const LOADER = {
       const meeting = meetings.find(m => m.meeting_key === session.meeting_key);
       if (!meeting) continue;
 
-      // 300ms gap between each session fetch
-      await this.delay(300);
+      await this.delay(800);
 
       const [result, drivers] = await Promise.all([
         API.getSessionResult(session.session_key),
@@ -224,15 +224,15 @@ const LOADER = {
 
       results.push({
         round,
-        name:       meeting.meeting_name,
+        name:         meeting.meeting_name,
         flag,
-        circuit:    meeting.circuit_short_name || meeting.location,
-        date:       session.date_start?.split("T")[0] || "",
-        sessionKey: session.session_key,
+        circuit:      meeting.circuit_short_name || meeting.location,
+        date:         session.date_start?.split("T")[0] || "",
+        sessionKey:   session.session_key,
         podium,
-        fastestLap: "—",
-        weather:    STATIC.defaultWeather,
-        notes:      `Round ${round} — ${meeting.location}`,
+        fastestLap:   "—",
+        weather:      STATIC.defaultWeather,
+        notes:        `Round ${round} — ${meeting.location}`,
         predAccuracy: null,
       });
     }
@@ -240,7 +240,6 @@ const LOADER = {
     return results.sort((a, b) => a.round - b.round);
   },
 
-  // Build calendar from meetings + sessions
   buildCalendar(meetings, raceSessions) {
     const now      = new Date();
     const calendar = [];
@@ -261,7 +260,6 @@ const LOADER = {
         new Date(raceDate) > now
       ) status = "next";
 
-      // Mark the very next upcoming race as "next" if none found in 7-day window
       if (
         status === "upcoming" &&
         calendar.filter(c => c.status === "next").length === 0 &&
@@ -282,7 +280,6 @@ const LOADER = {
       });
     });
 
-    // Ensure exactly one "next"
     const nextIdx = calendar.findIndex(c => c.status === "next");
     if (nextIdx === -1) {
       const firstUpcoming = calendar.find(c => c.status === "upcoming");
@@ -292,7 +289,6 @@ const LOADER = {
     return calendar;
   },
 
-  // Parse OpenF1 championship_drivers into our driver format
   parseDriverStandings(champData, driverMap) {
     return champData.map((c, idx) => {
       const d        = driverMap[c.driver_number] || {};
@@ -312,7 +308,6 @@ const LOADER = {
     });
   },
 
-  // Parse OpenF1 championship_teams into our team format
   parseTeamStandings(champData) {
     return champData.map((c, idx) => {
       const teamName = c.team_name || `Team ${idx + 1}`;
@@ -330,7 +325,6 @@ const LOADER = {
     });
   },
 
-  // Fallback: build state entirely from STATIC data
   buildFromStatic() {
     return {
       drivers:        STATIC.drivers,
@@ -347,8 +341,6 @@ const LOADER = {
 
 // ─────────────────────────────────────────────
 //  CACHE
-//  FIX: was deleted in v2 but predict.js still
-//  references it — added back here
 // ─────────────────────────────────────────────
 
 const CACHE = {
