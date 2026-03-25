@@ -1,53 +1,67 @@
 // ─────────────────────────────────────────────
 //  F1 PREDICTOR 2026  ·  app.js
-//  Main application controller
+//  Main app controller — all data from OpenF1
 // ─────────────────────────────────────────────
 
 const APP = {
 
   state: {
-    drivers: [],
-    teams: [],
-    calendar: [],
-    results: [],
-    forecast: null,
-    currentRace: null,
-    initialized: false,
+    drivers:        [],
+    teams:          [],
+    calendar:       [],
+    results:        [],
+    forecast:       null,
+    lastSessionKey: null,
+    initialized:    false,
+    loading:        true,
   },
 
   async init() {
-    // Load fallback data immediately so the UI isn't blank
-    this.state.drivers  = FALLBACK_DATA.drivers;
-    this.state.teams    = FALLBACK_DATA.teams;
-    this.state.calendar = FALLBACK_DATA.calendar;
-    this.state.results  = FALLBACK_DATA.results;
+    // Show skeleton loading state immediately
+    this.showSkeleton();
 
-    // Render with seed data right away
-    this.renderAll();
+    // Check API key
+    if (CONFIG.GEMINI_API_KEY.includes("PASTE_YOUR_GEMINI_KEY")) {
+      const banner = document.getElementById("api-banner");
+      if (banner) banner.style.display = "block";
+    }
 
-    // Then try to refresh live from OpenF1 in the background
-    this.refreshLiveData();
+    try {
+      // Load all live data from OpenF1
+      const data = await LOADER.loadAll();
+
+      this.state.drivers        = data.drivers;
+      this.state.teams          = data.teams;
+      this.state.calendar       = data.calendar;
+      this.state.results        = data.results;
+      this.state.lastSessionKey = data.lastSessionKey;
+      this.state.loading        = false;
+
+      // Render everything
+      this.renderAll();
+      console.log(`Loaded: ${this.state.calendar.length} races, ${this.state.drivers.length} drivers, ${this.state.results.length} results`);
+
+    } catch (e) {
+      console.error("Data load failed, using static fallback:", e);
+      this.state.drivers  = STATIC.drivers;
+      this.state.teams    = STATIC.teams;
+      this.state.calendar = STATIC.calendar;
+      this.state.results  = STATIC.results;
+      this.state.loading  = false;
+      this.renderAll();
+    }
   },
 
-  // ── LIVE DATA REFRESH ─────────────────────
-
-  async refreshLiveData() {
-    try {
-      // Update API key warning banner
-      if (CONFIG.OPENROUTER_API_KEY.includes("PASTE_YOUR_KEY")) {
-        const banner = document.getElementById("api-banner");
-        if (banner) banner.style.display = "block";
-      }
-
-      // Try to get the latest session from OpenF1
-      const sessions = await API.getSessions(CONFIG.SEASON);
-      if (sessions && sessions.length > 0) {
-        // Sessions data is available — could refresh standings here
-        console.log(`OpenF1: ${sessions.length} race sessions found for ${CONFIG.SEASON}`);
-      }
-    } catch (e) {
-      console.warn("Live data refresh failed, using seed data", e);
-    }
+  showSkeleton() {
+    const skeletonRow = `<div class="skeleton-row"></div>`;
+    ["driver-tbody","team-tbody","history-tbody"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = Array(5).fill(`<tr><td colspan="7">${skeletonRow}</td></tr>`).join("");
+    });
+    ["completed-races","upcoming-races"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = Array(3).fill(`<div class="race-row">${skeletonRow}</div>`).join("");
+    });
   },
 
   // ── RENDER ALL PAGES ──────────────────────
@@ -55,20 +69,20 @@ const APP = {
   renderAll() {
     const nextRace = this.state.calendar.find(r => r.status === "next");
 
-    try { UI.renderOverview({ nextRace, standings: { drivers: this.state.drivers, teams: this.state.teams }, results: this.state.results }); }
-    catch(e) { console.error("renderOverview failed:", e); }
+    try { UI.renderOverview({ nextRace, standings: { drivers: this.state.drivers, teams: this.state.teams } }); }
+    catch(e) { console.error("renderOverview:", e); }
 
     try { UI.renderCalendar(this.state.calendar, this.state.results); }
-    catch(e) { console.error("renderCalendar failed:", e); }
+    catch(e) { console.error("renderCalendar:", e); }
 
     try { UI.renderDriverStandings(this.state.drivers); }
-    catch(e) { console.error("renderDriverStandings failed:", e); }
+    catch(e) { console.error("renderDriverStandings:", e); }
 
     try { UI.renderTeamStandings(this.state.teams); }
-    catch(e) { console.error("renderTeamStandings failed:", e); }
+    catch(e) { console.error("renderTeamStandings:", e); }
 
     try { UI.renderHistory(this.state.results); }
-    catch(e) { console.error("renderHistory failed:", e); }
+    catch(e) { console.error("renderHistory:", e); }
 
     this.loadChampionsForecast();
     this.state.initialized = true;
@@ -77,77 +91,65 @@ const APP = {
   // ── OPEN RACE MODAL ───────────────────────
 
   async openRace(round) {
-    const race    = this.state.calendar.find(r => r.round === round);
-    const result  = this.state.results.find(r => r.round === round);
+    const race   = this.state.calendar.find(r => r.round === round);
+    const result = this.state.results.find(r => r.round === round);
     if (!race) return;
 
-    // For completed races, show the actual result
+    // Completed race — show result
     if (race.status === "done" && result) {
       this.showCompletedRace(race, result);
       return;
     }
 
-    // For upcoming races, fetch weather and run AI prediction
+    // Upcoming — fetch weather + run AI prediction
     document.getElementById("race-modal").classList.add("open");
     document.body.style.overflow = "hidden";
     document.getElementById("modal-title").textContent = race.flag + " " + race.name;
     document.getElementById("modal-body").innerHTML = `
       <div class="loading-screen">
         <div class="spinner lg"></div>
-        <div class="loading-steps" id="loading-steps">
-          <div class="load-step active" id="ls1">Fetching weather from Open-Meteo…</div>
-          <div class="load-step" id="ls2">Reading circuit & tyre data…</div>
-          <div class="load-step" id="ls3">Sending data to Qwen AI…</div>
-          <div class="load-step" id="ls4">Building prediction…</div>
+        <div class="loading-steps">
+          <div class="load-step active" id="ls1">Fetching weather from Open-Meteo...</div>
+          <div class="load-step" id="ls2">Reading circuit and tyre data...</div>
+          <div class="load-step" id="ls3">Sending data to Gemini AI...</div>
+          <div class="load-step" id="ls4">Building prediction...</div>
         </div>
       </div>`;
 
-    // Step 1: Weather
+    const step = (n) => {
+      document.getElementById(`ls${n-1}`)?.classList.replace("active","done");
+      document.getElementById(`ls${n}`)?.classList.add("active");
+    };
+
     const weather = await API.getWeather(race.name, race.date);
-    document.getElementById("ls1").classList.remove("active");
-    document.getElementById("ls1").classList.add("done");
-    document.getElementById("ls2").classList.add("active");
-    await this.delay(300);
+    step(2); await this.delay(200);
+    step(3);
 
-    // Step 2: Circuit data (already in memory)
-    document.getElementById("ls2").classList.remove("active");
-    document.getElementById("ls2").classList.add("done");
-    document.getElementById("ls3").classList.add("active");
-    await this.delay(200);
-
-    // Step 3: AI Prediction
     const prediction = await PREDICTOR.getPrediction(
       race, weather,
       this.state.drivers,
       this.state.teams,
       this.state.results
     );
+    step(4); await this.delay(150);
 
-    document.getElementById("ls3").classList.remove("active");
-    document.getElementById("ls3").classList.add("done");
-    document.getElementById("ls4").classList.add("active");
-    await this.delay(200);
-
-    // Step 4: Render
     UI.renderRacePrediction(race, weather, prediction);
   },
 
   showCompletedRace(race, result) {
     const modal = document.getElementById("race-modal");
-    const title = document.getElementById("modal-title");
-    const body  = document.getElementById("modal-body");
+    document.getElementById("modal-title").textContent =
+      race.flag + " " + race.name + " — Round " + race.round + " Result";
 
-    title.textContent = race.flag + " " + race.name + " — Round " + race.round + " Result";
+    const tc = t => (STATIC.teamMeta[t] || STATIC.teamMeta["Default"]).color;
 
-    const tc = (team) => UI.teamColors[team] || "#888";
-
-    body.innerHTML = `
+    document.getElementById("modal-body").innerHTML = `
       <div class="modal-grid">
         <div class="modal-section full-width">
           <div class="section-label">Official race result</div>
           ${result.podium.map(p => `
             <div class="podium-row">
-              <span class="pod-pos pos${p.pos}">${p.pos === 1 ? "🥇" : p.pos === 2 ? "🥈" : "🥉"}</span>
+              <span class="pod-pos pos${p.pos}">${p.pos===1?"🥇":p.pos===2?"🥈":"🥉"}</span>
               <div class="pod-info">
                 <div class="pod-name">${p.driver}</div>
                 <div class="pod-team" style="color:${tc(p.team)}">${p.team}</div>
@@ -159,8 +161,8 @@ const APP = {
           <div class="factor-grid">
             <div class="factor-item"><div class="fi-label">Weather</div><div class="fi-val">${result.weather?.condition || "—"}</div></div>
             <div class="factor-item"><div class="fi-label">Temperature</div><div class="fi-val">${result.weather?.tempMax || "—"}°C</div></div>
-            <div class="factor-item"><div class="fi-label">Fastest lap</div><div class="fi-val">${result.fastestLap}</div></div>
-            <div class="factor-item"><div class="fi-label">Pred. accuracy</div><div class="fi-val">${result.predAccuracy}%</div></div>
+            <div class="factor-item"><div class="fi-label">Fastest lap</div><div class="fi-val">${result.fastestLap || "—"}</div></div>
+            <div class="factor-item"><div class="fi-label">Pred. accuracy</div><div class="fi-val">${result.predAccuracy ? result.predAccuracy + "%" : "Pending"}</div></div>
           </div>
         </div>
         <div class="modal-section">
@@ -184,24 +186,19 @@ const APP = {
       this.state.forecast = forecast;
       UI.renderChampionshipForecast(forecast);
     } catch (e) {
-      console.warn("Championship forecast failed", e);
+      console.error("Championship forecast error:", e);
       UI.renderChampionshipForecast(PREDICTOR.getFallbackForecast());
     }
   },
 
-  // ── HELPERS ───────────────────────────────
-
-  delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); },
+  delay(ms) { return new Promise(r => setTimeout(r, ms)); },
 };
 
 // ── BOOT ──────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
-  // Wire nav tabs
   document.querySelectorAll(".nav-tab").forEach(tab => {
     tab.addEventListener("click", () => UI.switchTab(tab.dataset.tab));
   });
-
-  // Wire modal close
   document.getElementById("modal-close")?.addEventListener("click", () => UI.closeModal());
   document.getElementById("race-modal")?.addEventListener("click", e => {
     if (e.target.id === "race-modal") UI.closeModal();
@@ -209,7 +206,5 @@ document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener("keydown", e => {
     if (e.key === "Escape") UI.closeModal();
   });
-
-  // Start the app
   APP.init();
 });

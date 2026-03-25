@@ -1,17 +1,18 @@
 // ─────────────────────────────────────────────
 //  F1 PREDICTOR 2026  ·  config.js
-//  Paste your OpenRouter key here before deploying
+//  Paste your Gemini API key here before deploying
 // ─────────────────────────────────────────────
 
 const CONFIG = {
-  // Get your free key at https://openrouter.ai/keys
-  OPENROUTER_API_KEY: "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",
+  // Get your FREE key at https://aistudio.google.com
+  // Click "Get API key" -> "Create API key" -> paste it below (no card needed)
+  GEMINI_API_KEY: "AIzaSyCXVK8wt52SsBURCdBKKqyAJ9MEN2lPxcY",
 
-  // Free Qwen models via OpenRouter (first is tried, second is fallback)
-  QWEN_MODEL: "qwen/qwen3-235b-a22b:free",
-  QWEN_MODEL_FALLBACK: "qwen/qwen3-8b:free",
+  // Gemini model — 2.5 Flash is free, fast, great at structured JSON output
+  GEMINI_MODEL: "gemini-2.5-flash",
+  GEMINI_MODEL_FALLBACK: "gemini-2.0-flash",
 
-  // API base URLs (all free, no key needed except OpenRouter)
+  // API base URLs (all free, no key needed except Gemini)
   OPENF1_BASE: "https://api.openf1.org/v1",
   OPENMETEO_BASE: "https://api.open-meteo.com/v1",
 
@@ -40,7 +41,7 @@ const CONFIG = {
     "Singapore Grand Prix":    { lat: 1.2914,  lon: 103.8639, timezone: "Asia/Singapore" },
     "United States Grand Prix":{ lat: 30.1328, lon: -97.6411, timezone: "America/Chicago" },
     "Mexico City Grand Prix":  { lat: 19.4042, lon: -99.0907, timezone: "America/Mexico_City" },
-    "São Paulo Grand Prix":    { lat: -23.7036, lon: -46.6997, timezone: "America/Sao_Paulo" },
+    "Sao Paulo Grand Prix":    { lat: -23.7036, lon: -46.6997, timezone: "America/Sao_Paulo" },
     "Las Vegas Grand Prix":    { lat: 36.1699, lon: -115.1398, timezone: "America/Los_Angeles" },
     "Qatar Grand Prix":        { lat: 25.4900, lon: 51.4542,  timezone: "Asia/Qatar" },
     "Abu Dhabi Grand Prix":    { lat: 24.4672, lon: 54.6031,  timezone: "Asia/Dubai" },

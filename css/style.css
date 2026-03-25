@@ -232,3 +232,13 @@ footer { text-align:center; padding:2rem; font-size:11px; color:var(--gray-300);
   .champ-cards { grid-template-columns:1fr; }
   .stat-strip { gap:1rem; }
 }
+
+/* ── SKELETON LOADING ── */
+.skeleton-row {
+  height: 14px;
+  background: linear-gradient(90deg, var(--gray-100) 25%, var(--gray-200) 50%, var(--gray-100) 75%);
+  background-size: 200% 100%;
+  border-radius: 4px;
+  animation: shimmer 1.4s infinite;
+}
+@keyframes shimmer { to { background-position: -200% 0; } }
