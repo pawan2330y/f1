@@ -35,7 +35,8 @@ const APP = {
     try {
       // Update API key warning banner
       if (CONFIG.OPENROUTER_API_KEY.includes("PASTE_YOUR_KEY")) {
-        document.getElementById("api-banner")?.classList.remove("hidden");
+        const banner = document.getElementById("api-banner");
+        if (banner) banner.style.display = "block";
       }
 
       // Try to get the latest session from OpenF1
@@ -52,27 +53,24 @@ const APP = {
   // ── RENDER ALL PAGES ──────────────────────
 
   renderAll() {
-    // Overview
     const nextRace = this.state.calendar.find(r => r.status === "next");
-    UI.renderOverview({
-      nextRace,
-      standings: { drivers: this.state.drivers, teams: this.state.teams },
-      results: this.state.results,
-    });
 
-    // Calendar
-    UI.renderCalendar(this.state.calendar, this.state.results);
+    try { UI.renderOverview({ nextRace, standings: { drivers: this.state.drivers, teams: this.state.teams }, results: this.state.results }); }
+    catch(e) { console.error("renderOverview failed:", e); }
 
-    // Standings tables
-    UI.renderDriverStandings(this.state.drivers);
-    UI.renderTeamStandings(this.state.teams);
+    try { UI.renderCalendar(this.state.calendar, this.state.results); }
+    catch(e) { console.error("renderCalendar failed:", e); }
 
-    // History
-    UI.renderHistory(this.state.results);
+    try { UI.renderDriverStandings(this.state.drivers); }
+    catch(e) { console.error("renderDriverStandings failed:", e); }
 
-    // Champions page - load in background
+    try { UI.renderTeamStandings(this.state.teams); }
+    catch(e) { console.error("renderTeamStandings failed:", e); }
+
+    try { UI.renderHistory(this.state.results); }
+    catch(e) { console.error("renderHistory failed:", e); }
+
     this.loadChampionsForecast();
-
     this.state.initialized = true;
   },
 

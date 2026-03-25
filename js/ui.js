@@ -56,22 +56,26 @@ const UI = {
 
   // ── OVERVIEW PAGE ─────────────────────────
 
-  renderOverview(data) {
-    const { nextRace, weather, standings, forecast } = data;
+  set(id, text) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  },
 
-    // Hero stats
-    document.getElementById("wdc-leader-name").textContent = standings.drivers[0]?.name || "—";
-    document.getElementById("wdc-leader-pts").textContent = standings.drivers[0]?.pts + " pts";
-    document.getElementById("wcc-leader-name").textContent = standings.teams[0]?.name || "—";
-    document.getElementById("wcc-leader-pts").textContent = standings.teams[0]?.pts + " pts";
-    document.getElementById("races-done").textContent = FALLBACK_DATA.results.length;
-    document.getElementById("races-total").textContent = FALLBACK_DATA.calendar.length;
+  renderOverview(data) {
+    const { nextRace, standings } = data;
+
+    this.set("wdc-leader-name", standings.drivers[0]?.name || "—");
+    this.set("wdc-leader-pts", (standings.drivers[0]?.pts ?? "—") + " pts");
+    this.set("wcc-leader-name", standings.teams[0]?.name || "—");
+    this.set("wcc-leader-pts", (standings.teams[0]?.pts ?? "—") + " pts");
+    this.set("races-done", FALLBACK_DATA.results.length);
+    this.set("races-total", FALLBACK_DATA.calendar.length);
+
     if (nextRace) {
-      document.getElementById("next-race-name").textContent = nextRace.flag + " " + nextRace.name;
-      document.getElementById("next-race-date").textContent = new Date(nextRace.date).toLocaleDateString("en-GB", { day:"numeric", month:"short" });
+      this.set("next-race-name", nextRace.flag + " " + nextRace.name);
+      this.set("next-race-date", new Date(nextRace.date).toLocaleDateString("en-GB", { day:"numeric", month:"short" }));
     }
 
-    // WDC mini bars
     this.renderMiniStandings("overview-wdc", standings.drivers.slice(0,5), "pts", 300, d => this.tc(d.team));
     this.renderMiniStandings("overview-wcc", standings.teams.slice(0,4), "pts", 400, t => this.tc(t.name));
   },
