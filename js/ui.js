@@ -117,7 +117,7 @@ const UI = {
         <span class="res-pos p1">P1</span><span class="res-driver">${result.podium[0].code}</span>
         <span class="res-pos p2">P2</span><span class="res-driver">${result.podium[1].code}</span>
         <span class="res-pos p3">P3</span><span class="res-driver">${result.podium[2].code}</span>
-        <span class="res-acc">${result.predAccuracy}% accurate</span>
+        <span class="res-acc">${result.predAccuracy != null ? result.predAccuracy + "% accurate" : ""}</span>
       </div>` : "";
 
     return `
@@ -146,12 +146,12 @@ const UI = {
     title.textContent = race.flag + " " + race.name + " — Round " + race.round;
 
     const isFallback = prediction._fallback;
-    const conf = prediction.confidenceScore || 0;
-    const circuit = FALLBACK_DATA.circuitProfiles[race.name] || {};
-    const tyres   = TYRE_DATA[race.name] || { strategy: "1-stop", degradation: "Medium" };
+    const conf       = prediction.confidenceScore || 0;
+    const circuit    = FALLBACK_DATA.circuitProfiles[race.name] || {};
+    const tyres      = TYRE_DATA[race.name] || { strategy: "1-stop", degradation: "Medium" };
 
     body.innerHTML = `
-      ${isFallback ? `<div class="api-warning">AI prediction unavailable — showing model estimate. Check your OpenRouter API key in config.js</div>` : ""}
+      ${isFallback ? `<div class="api-warning">AI prediction unavailable — showing model estimate. Check your Gemini API key in config.js</div>` : ""}
 
       <div class="modal-grid">
 
@@ -172,10 +172,10 @@ const UI = {
         <div class="modal-section">
           <div class="section-label">Predicted podium</div>
           <div class="pred-loading" style="display:none;align-items:center;gap:10px;padding:1rem 0;">
-            <div class="spinner"></div><span style="font-size:13px;color:var(--gray-500)">Qwen AI is analysing…</span>
+            <div class="spinner"></div><span style="font-size:13px;color:var(--gray-500)">Gemini AI is analysing…</span>
           </div>
           <div class="pred-content">
-            ${prediction.podium.map((p, i) => `
+            ${prediction.podium.map((p) => `
               <div class="podium-row">
                 <span class="pod-pos pos${p.position}">${p.position === 1 ? "🥇" : p.position === 2 ? "🥈" : "🥉"}</span>
                 <div class="pod-info">
@@ -221,12 +221,16 @@ const UI = {
         </div>
 
         <!-- Confidence -->
+        <!-- FIX: was referencing CONFIG.QWEN_MODEL which no longer exists in v2 -->
         <div class="modal-section full-width">
           <div class="section-label">Model confidence</div>
           <div class="conf-bar-wrap">
             <div class="conf-bar" style="width:${conf}%;background:${conf > 75 ? '#22c55e' : conf > 60 ? '#f59e0b' : '#ef4444'}"></div>
           </div>
-          <div class="conf-labels"><span>${conf}%</span><span style="color:var(--gray-400);font-size:11px;">Powered by Qwen · ${prediction._model || CONFIG.QWEN_MODEL} · via OpenRouter</span></div>
+          <div class="conf-labels">
+            <span>${conf}%</span>
+            <span style="color:var(--gray-400);font-size:11px;">Powered by Gemini · ${prediction._model || CONFIG.GEMINI_MODEL}</span>
+          </div>
         </div>
 
       </div>`;
@@ -394,7 +398,11 @@ const UI = {
             ${r.podium.map(p => `<span class="pi-pos pos${p.pos} mono">${p.code}</span>`).join(" ")}
           </div>
         </td>
-        <td><span class="badge badge-${r.predAccuracy >= 80 ? 'green' : r.predAccuracy >= 65 ? 'amber' : 'gray'}">${r.predAccuracy}%</span></td>
+        <td>
+          ${r.predAccuracy != null
+            ? `<span class="badge badge-${r.predAccuracy >= 80 ? 'green' : r.predAccuracy >= 65 ? 'amber' : 'gray'}">${r.predAccuracy}%</span>`
+            : `<span class="badge badge-gray">Pending</span>`}
+        </td>
         <td style="font-size:12px;color:var(--gray-500);max-width:200px">${r.notes}</td>
       </tr>`).join("");
   },

@@ -158,16 +158,19 @@ const LOADER = {
 
     // 3. Fetch championship standings from last completed session
     let driverStandings = null;
-    let teamStandings = null;
-    let driverMap = {};
+    let teamStandings   = null;
+    let driverMap       = {};
 
     if (lastSession) {
-      const [champDrivers, champTeams, drivers] = await Promise.all([
-        API.getDriverChampionship(lastSession.session_key),
-        API.getConstructorChampionship(lastSession.session_key),
-        API.getDrivers(lastSession.session_key),
-      ]);
-      if (drivers) driverMap = drivers;
+      // FIX: sequential with delay to avoid 429 rate limiting
+      await this.delay(300);
+      const champDrivers = await API.getDriverChampionship(lastSession.session_key);
+      await this.delay(300);
+      const champTeams = await API.getConstructorChampionship(lastSession.session_key);
+      await this.delay(300);
+      const drivers = await API.getDrivers(lastSession.session_key);
+
+      if (drivers)      driverMap      = drivers;
       if (champDrivers) driverStandings = this.parseDriverStandings(champDrivers, driverMap);
       if (champTeams)   teamStandings   = this.parseTeamStandings(champTeams);
     }
@@ -179,67 +182,67 @@ const LOADER = {
     const calendar = this.buildCalendar(meetings, raceSessions || []);
 
     return {
-      drivers:  driverStandings  || STATIC.drivers,
-      teams:    teamStandings    || STATIC.teams,
+      drivers:        driverStandings || STATIC.drivers,
+      teams:          teamStandings   || STATIC.teams,
       calendar,
       results,
       lastSessionKey: lastSession?.session_key || null,
     };
   },
 
-  // Build race results from all completed sessions
+  // FIX: sequential loop with delay instead of Promise.all to avoid 429s
   async loadResults(completedSessions, meetings) {
     const results = [];
+    const toLoad  = completedSessions.slice(-5);
 
-    // Load in parallel — but cap at 5 most recent to avoid rate limiting
-    const toLoad = completedSessions.slice(-5);
-
-    await Promise.all(toLoad.map(async (session) => {
+    for (const session of toLoad) {
       const meeting = meetings.find(m => m.meeting_key === session.meeting_key);
-      if (!meeting) return;
+      if (!meeting) continue;
+
+      // 300ms gap between each session fetch
+      await this.delay(300);
 
       const [result, drivers] = await Promise.all([
         API.getSessionResult(session.session_key),
         API.getDrivers(session.session_key),
       ]);
 
-      if (!result || result.length < 3) return;
+      if (!result || result.length < 3) continue;
 
       const podium = result.slice(0, 3).map(r => {
         const d = drivers?.[r.driver_number] || {};
         return {
-          pos: r.position,
-          driver: d.full_name || `#${r.driver_number}`,
-          team: d.team_name || "Unknown",
-          code: d.name_acronym || String(r.driver_number),
+          pos:    r.position,
+          driver: d.full_name    || `#${r.driver_number}`,
+          team:   d.team_name    || "Unknown",
+          code:   d.name_acronym || String(r.driver_number),
         };
       });
 
-      // Find round number by matching meeting order
       const round = meetings.findIndex(m => m.meeting_key === meeting.meeting_key) + 1;
-      const flag = STATIC.countryFlags[meeting.country_name] || "🏁";
+      const flag  = STATIC.countryFlags[meeting.country_name] || "🏁";
 
       results.push({
         round,
-        name: meeting.meeting_name,
+        name:       meeting.meeting_name,
         flag,
-        circuit: meeting.circuit_short_name || meeting.location,
-        date: session.date_start?.split("T")[0] || "",
+        circuit:    meeting.circuit_short_name || meeting.location,
+        date:       session.date_start?.split("T")[0] || "",
         sessionKey: session.session_key,
         podium,
         fastestLap: "—",
-        weather: STATIC.defaultWeather,
-        notes: `Round ${round} — ${meeting.location}`,
-        predAccuracy: null, // not hardcoded — will be calculated after predictions
+        weather:    STATIC.defaultWeather,
+        notes:      `Round ${round} — ${meeting.location}`,
+        predAccuracy: null,
       });
-    }));
+    }
 
     return results.sort((a, b) => a.round - b.round);
   },
 
   // Build calendar from meetings + sessions
   buildCalendar(meetings, raceSessions) {
-    const now = new Date();
+    const now      = new Date();
     const calendar = [];
 
     meetings.forEach((meeting, idx) => {
@@ -248,22 +251,29 @@ const LOADER = {
       );
       const raceDate = raceSession?.date_start || meeting.date_start;
       const raceEnd  = raceSession?.date_end;
-      const flag = STATIC.countryFlags[meeting.country_name] || "🏁";
+      const flag     = STATIC.countryFlags[meeting.country_name] || "🏁";
 
       let status = "upcoming";
       if (raceEnd && new Date(raceEnd) < now) status = "done";
-      else if (raceDate && new Date(raceDate) <= new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
-               && new Date(raceDate) > now) status = "next";
+      else if (
+        raceDate &&
+        new Date(raceDate) <= new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000) &&
+        new Date(raceDate) > now
+      ) status = "next";
+
       // Mark the very next upcoming race as "next" if none found in 7-day window
-      if (status === "upcoming" && calendar.filter(c => c.status === "next").length === 0
-          && raceDate && new Date(raceDate) > now) status = "next";
+      if (
+        status === "upcoming" &&
+        calendar.filter(c => c.status === "next").length === 0 &&
+        raceDate && new Date(raceDate) > now
+      ) status = "next";
 
       calendar.push({
-        round:   idx + 1,
-        name:    meeting.meeting_name,
+        round:       idx + 1,
+        name:        meeting.meeting_name,
         flag,
-        circuit: meeting.circuit_short_name || meeting.location,
-        date:    raceDate?.split("T")[0] || "",
+        circuit:     meeting.circuit_short_name || meeting.location,
+        date:        raceDate?.split("T")[0] || "",
         status,
         meetingKey:  meeting.meeting_key,
         sessionKey:  raceSession?.session_key || null,
@@ -285,17 +295,16 @@ const LOADER = {
   // Parse OpenF1 championship_drivers into our driver format
   parseDriverStandings(champData, driverMap) {
     return champData.map((c, idx) => {
-      const d = driverMap[c.driver_number] || {};
+      const d        = driverMap[c.driver_number] || {};
       const teamName = d.team_name || "Unknown";
       return {
         pos:         c.position_current || idx + 1,
-        code:        d.name_acronym || String(c.driver_number),
-        name:        d.full_name || `Driver #${c.driver_number}`,
+        code:        d.name_acronym     || String(c.driver_number),
+        name:        d.full_name        || `Driver #${c.driver_number}`,
         team:        teamName,
-        pts:         c.points_current || 0,
-        nationality: d.country_code || "—",
+        pts:         c.points_current   || 0,
+        nationality: d.country_code     || "—",
         number:      c.driver_number,
-        // Mentality & wet scores kept as static — these are your team's analysis inputs
         mentality:   STATIC.driverScores[d.name_acronym]?.mentality || 7.5,
         wet:         STATIC.driverScores[d.name_acronym]?.wet       || 7.5,
         starts:      STATIC.driverScores[d.name_acronym]?.starts    || 0,
@@ -307,11 +316,11 @@ const LOADER = {
   parseTeamStandings(champData) {
     return champData.map((c, idx) => {
       const teamName = c.team_name || `Team ${idx + 1}`;
-      const meta = STATIC.teamMeta[teamName] || STATIC.teamMeta["Default"];
+      const meta     = STATIC.teamMeta[teamName] || STATIC.teamMeta["Default"];
       return {
         pos:         c.position_current || idx + 1,
         name:        teamName,
-        pts:         c.points_current || 0,
+        pts:         c.points_current   || 0,
         color:       meta.color,
         engine:      meta.engine,
         reliability: meta.reliability,
@@ -324,11 +333,37 @@ const LOADER = {
   // Fallback: build state entirely from STATIC data
   buildFromStatic() {
     return {
-      drivers:  STATIC.drivers,
-      teams:    STATIC.teams,
-      calendar: STATIC.calendar,
-      results:  STATIC.results,
+      drivers:        STATIC.drivers,
+      teams:          STATIC.teams,
+      calendar:       STATIC.calendar,
+      results:        STATIC.results,
       lastSessionKey: null,
     };
+  },
+
+  delay(ms) { return new Promise(r => setTimeout(r, ms)); },
+};
+
+
+// ─────────────────────────────────────────────
+//  CACHE
+//  FIX: was deleted in v2 but predict.js still
+//  references it — added back here
+// ─────────────────────────────────────────────
+
+const CACHE = {
+  _store: {},
+
+  get(key) {
+    if (this._store[key]) return this._store[key];
+    try {
+      const val = localStorage.getItem("f1_" + key);
+      return val ? JSON.parse(val) : null;
+    } catch { return null; }
+  },
+
+  set(key, val) {
+    this._store[key] = val;
+    try { localStorage.setItem("f1_" + key, JSON.stringify(val)); } catch {}
   },
 };
