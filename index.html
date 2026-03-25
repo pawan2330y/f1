@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>F1 Predictor 2026 — College Edition</title>
+  <meta name="description" content="AI-powered Formula 1 race predictions using OpenF1, Open-Meteo weather data, and Qwen AI." />
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='16' fill='%23E8002D'/><text y='.9em' font-size='70' x='12'>F1</text></svg>" />
+</head>
+<body>
+
+<!-- ═══════════ API KEY BANNER ═══════════ -->
+<div id="api-banner" class="api-banner hidden" style="display:none">
+  ⚠ OpenRouter API key not set. Open <code>js/config.js</code> and replace <code>PASTE_YOUR_KEY_HERE</code> with your key from <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a> (free).
+</div>
+
+<!-- ═══════════ NAVIGATION ═══════════ -->
+<nav>
+  <div class="nav-brand">
+    <div class="nav-logo">F1</div>
+    Predictor <span style="color:#9e9e9e;font-weight:300;margin-left:3px">2026</span>
+  </div>
+  <div class="nav-tabs">
+    <div class="nav-tab active" data-tab="home">Overview</div>
+    <div class="nav-tab" data-tab="races">Races</div>
+    <div class="nav-tab" data-tab="drivers">Drivers</div>
+    <div class="nav-tab" data-tab="teams">Teams</div>
+    <div class="nav-tab" data-tab="champions">Champions</div>
+    <div class="nav-tab" data-tab="history">History</div>
+  </div>
+</nav>
+
+<!-- ═══════════ HOME ═══════════ -->
+<div id="home" class="page active">
+  <div class="hero">
+    <div class="hero-label">2026 FIA Formula One World Championship</div>
+    <h1>F1 Predictor — College Edition</h1>
+    <p>AI-powered race predictions combining live F1 data, circuit weather, tyre strategy, driver mentality scores, and Qwen AI reasoning.</p>
+    <div class="stat-strip">
+      <div class="stat-item"><span class="stat-label">Season</span><span class="stat-val">2026</span></div>
+      <div class="stat-item"><span class="stat-label">Rounds</span><span class="stat-val"><span id="races-done">2</span> / <span id="races-total">22</span></span></div>
+      <div class="stat-item"><span class="stat-label">WDC Leader</span><span class="stat-val red" id="wdc-leader-name">—</span></div>
+      <div class="stat-item"><span class="stat-label">WCC Leader</span><span class="stat-val red" id="wcc-leader-name">—</span></div>
+      <div class="stat-item"><span class="stat-label">Next Race</span><span class="stat-val" id="next-race-name">—</span></div>
+    </div>
+  </div>
+
+  <div class="cards cards-2">
+    <div class="card">
+      <div class="section-label" style="margin-bottom:.75rem">Driver championship</div>
+      <div id="overview-wdc"></div>
+    </div>
+    <div class="card">
+      <div class="section-label" style="margin-bottom:.75rem">Constructor championship</div>
+      <div id="overview-wcc"></div>
+    </div>
+  </div>
+
+  <div class="sec-header" style="margin-top:1.5rem">
+    <span class="sec-title">How it works</span>
+  </div>
+  <div class="cards cards-3">
+    <div class="card">
+      <div style="font-size:11px;font-family:var(--mono);color:var(--red);margin-bottom:6px;letter-spacing:.5px">01 · DATA</div>
+      <div style="font-size:13px;font-weight:500;margin-bottom:4px">Live F1 data</div>
+      <div style="font-size:12px;color:var(--gray-500);line-height:1.7">OpenF1 API provides real-time driver positions, lap times, tyre stints, and session data.</div>
+    </div>
+    <div class="card">
+      <div style="font-size:11px;font-family:var(--mono);color:var(--red);margin-bottom:6px;letter-spacing:.5px">02 · WEATHER</div>
+      <div style="font-size:13px;font-weight:500;margin-bottom:4px">Race weekend forecast</div>
+      <div style="font-size:12px;color:var(--gray-500);line-height:1.7">Open-Meteo provides hour-by-hour temperature, wind, and rain probability at each circuit location.</div>
+    </div>
+    <div class="card">
+      <div style="font-size:11px;font-family:var(--mono);color:var(--red);margin-bottom:6px;letter-spacing:.5px">03 · AI</div>
+      <div style="font-size:13px;font-weight:500;margin-bottom:4px">Qwen prediction engine</div>
+      <div style="font-size:12px;color:var(--gray-500);line-height:1.7">Qwen3-235B via OpenRouter analyses all data and generates podium predictions with confidence percentages and written reasoning.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ RACES ═══════════ -->
+<div id="races" class="page">
+  <div class="hero">
+    <div class="hero-label">Race Calendar · 2026</div>
+    <h1>Grand Prix Schedule</h1>
+    <p>Click any upcoming race to generate a live AI prediction using real weather and circuit data. Completed races show official results.</p>
+  </div>
+  <div class="sec-header"><span class="sec-title">Completed</span></div>
+  <div id="completed-races"></div>
+  <div class="sec-header"><span class="sec-title">Upcoming</span><span class="sec-sub">Click to generate prediction</span></div>
+  <div id="upcoming-races"></div>
+</div>
+
+<!-- ═══════════ DRIVERS ═══════════ -->
+<div id="drivers" class="page">
+  <div class="hero">
+    <div class="hero-label">Driver Championship · After Round 2</div>
+    <h1>Driver Standings</h1>
+    <p>Live standings with mentality and wet-weather scores used in the prediction model.</p>
+  </div>
+  <div class="card" style="padding:0;overflow:hidden">
+    <table>
+      <thead>
+        <tr>
+          <th>Pos</th><th>Driver</th><th>Nationality</th>
+          <th>Mentality</th><th>Wet skill</th><th style="text-align:right">Points</th>
+        </tr>
+      </thead>
+      <tbody id="driver-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════ TEAMS ═══════════ -->
+<div id="teams" class="page">
+  <div class="hero">
+    <div class="hero-label">Constructor Championship · After Round 2</div>
+    <h1>Constructor Standings</h1>
+    <p>Team standings with performance scores that feed directly into the AI prediction model.</p>
+  </div>
+  <div class="card" style="padding:0;overflow:hidden">
+    <table>
+      <thead>
+        <tr>
+          <th>Pos</th><th>Constructor</th><th>Engine</th>
+          <th>Pace</th><th>Reliability</th><th>Strategy</th>
+          <th style="text-align:right">Points</th>
+        </tr>
+      </thead>
+      <tbody id="team-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════ CHAMPIONS ═══════════ -->
+<div id="champions" class="page">
+  <div class="hero">
+    <div class="hero-label">Season Forecast · World Championship</div>
+    <h1>WDC &amp; WCC Predictions</h1>
+    <p>Qwen AI analyses current standings, car pace, driver mentality, and remaining calendar to forecast each championship.</p>
+  </div>
+  <div class="champ-cards">
+    <div>
+      <div class="sec-header"><span class="sec-title">World Drivers' Championship</span></div>
+      <div class="champ-card-box" id="wdc-forecast">
+        <div class="loading-row"><div class="spinner"></div><span>Generating WDC forecast…</span></div>
+      </div>
+    </div>
+    <div>
+      <div class="sec-header"><span class="sec-title">World Constructors' Championship</span></div>
+      <div class="champ-card-box" id="wcc-forecast">
+        <div class="loading-row"><div class="spinner"></div><span>Generating WCC forecast…</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ HISTORY ═══════════ -->
+<div id="history" class="page">
+  <div class="hero">
+    <div class="hero-label">Race History · 2026 Season</div>
+    <h1>Results &amp; Model Accuracy</h1>
+    <p>Completed race results alongside our model's prediction accuracy for the college leaderboard.</p>
+  </div>
+  <div class="card" style="padding:0;overflow:hidden">
+    <table>
+      <thead>
+        <tr>
+          <th>Rnd</th><th>Race</th><th>Date</th>
+          <th>Podium</th><th>Accuracy</th><th>Notes</th>
+        </tr>
+      </thead>
+      <tbody id="history-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════ RACE MODAL ═══════════ -->
+<div id="race-modal" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h2 id="modal-title">Race Prediction</h2>
+      <button class="modal-close-btn" id="modal-close">&#x2715;</button>
+    </div>
+    <div class="modal-body" id="modal-body">
+    </div>
+  </div>
+</div>
+
+<footer>
+  F1 Predictor 2026 — College Edition &nbsp;·&nbsp;
+  Data: OpenF1 API &amp; Open-Meteo &nbsp;·&nbsp;
+  AI: Qwen3-235B via OpenRouter &nbsp;·&nbsp;
+  Not affiliated with FIA or Formula 1
+</footer>
+
+<!-- ═══════════ SCRIPTS ═══════════ -->
+<!-- Load order matters: config → fallback → api → predict → ui → app -->
+<script src="js/config.js"></script>
+<script src="js/fallback.js"></script>
+<script src="js/api.js"></script>
+<script src="js/predict.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>
